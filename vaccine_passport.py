@@ -33,7 +33,7 @@ from datetime import date, timedelta
 from math import gcd
 import re
 
-from secrets import randbelow, token_bytes
+from secrets import randbelow, token_bytes, randbits
 import socket
 from sys import exit
 
@@ -41,6 +41,7 @@ from threading import Thread
 from time import sleep
 from typing import Callable, Iterator, Mapping, Optional, Union
 
+from random import randint
 
 # bad news: all their external imports aren't imported into this namespace, 
 #  so you'll need to reimport. Do so here.
@@ -99,7 +100,17 @@ class DH_params:
 
         return calc_B( self.g, self.N, b, self.k, v )
 
+# reference:https://sites.psu.edu/gottiparthyanirudh/writing-sample-3/
+def gcdExtended(a, b): 
+    # Base Case 
+    if (a % b) == 0 :  
+        return b,0,1
+             
+    gcd,x,y = gcdExtended(b, a % b) 
+    x = x - ((a//b) * y)
+    return gcd,y,x   
 
+    
 class RSA_key:
     """Represents an RSA modulus and keypair within the system. Makes it easier
        to generate and share these values, and gives a clean interface for
@@ -173,7 +184,10 @@ class RSA_key:
         assert type(bits) == int
         assert (bits & 0x1) == 0        # must be even
 
-        # delete this comment and insert your code here
+        length = int(bits/2)
+        p = safe_prime(length)
+        q = safe_prime(length)
+        return (p,q)
 
     @staticmethod
     def keypair( p:int, q:int ) -> tuple[int,int]:
@@ -201,8 +215,18 @@ class RSA_key:
         assert type(p) == int
         assert type(q) == int
 
-        # delete this comment and insert your code here
+        phi = (p - 1)* (q - 1)
+        e = randint(1, phi)
+        gcd, x, y = gcdExtended(e,phi)
+         
+        while gcd != 1:
+            e = randint(1, phi)
+            gcd, x, y = gcdExtended(e,phi)    
+        
+        d = x%phi           # mod inverse
+        return (e,d)
 
+            
     def sign( self, message:Union[int,bytes] ) -> Union[int,None]:
         """Sign a message via this RSA key, if possible.
     
@@ -271,6 +295,8 @@ class RSA_key:
         assert type(message) in [int, bytes]
 
         # delete this comment and insert your code here
+         
+        
 
     def decrypt( self, cypher: Union[int,bytes] ) -> Union[int,None]:
         """Decrypt a message via this RSA key.
@@ -292,7 +318,7 @@ class RSA_key:
         assert type(cypher) in [int, bytes]
 
         # delete this comment and insert your code here
-
+  
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
        assignment sheet for details.
@@ -312,7 +338,36 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert (target > 1) and (target < 256)
 
-    # delete this comment and insert your code here
+    given = given_name.encode('utf-8')
+    given_len = len(given)
+    sur = surname.encode('utf-8')
+    sur_len = len(sur)
+    
+    name_length = target - 1
+
+    while (given_len + sur_len) > name_length:
+        if len(given_name) > len(surname):
+            given_name = given_name[:-1]
+            given = given_name.encode('utf-8')
+            given_len = len(given)   
+        else:
+            surname = surname[:-1]
+            sur = surname.encode('utf-8')
+            sur_len = len(sur)
+    
+    index_byte = bytearray(int_to_bytes(given_len, 1))
+    
+    if (given_len + sur_len) < name_length:
+        index = randint(given_len, name_length - sur_len)
+        index_byte = bytearray(int_to_bytes(index, 1))
+        if index > given_len:
+            padding = index - given_len
+            given = given + bytes(padding)
+        if name_length > (index + sur_len):
+            padding = name_length - (index + sur_len)
+            sur = sur + bytes(padding)
+    compact = bytes(index_byte + bytearray(given) + bytearray(sur))
+    return compact
 
 def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
         last_vax_date:date ) -> bytes:
@@ -333,8 +388,39 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
     """
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert vax_count >= 0
+    
+    # first 4 bits in first byte
+    if vax_count > 15:
+        vax_count = 15
 
-    # delete this comment and insert your code here
+    # last 4 bits in first byte are the upper portion of the vax date
+    zero_byte = str(format(vax_count, "b")).zfill(4)
+
+    # 8 bits in second byte: weeks since June 11th, 2006 of last vaccine shot
+    # reference: https://stackoverflow.com/questions/14191832/how-to-calculate-difference-between-two-dates-in-weeks-in-python
+    monday_start = (date(2006, 6, 11) - timedelta(days = last_vax_date.weekday()))
+    monday_vax = (last_vax_date - timedelta(days = last_vax_date.weekday()))  
+    weeks = int((monday_vax - monday_start).days / 7)
+    if weeks > 4095 or vax_count == 0:
+        weeks = 4095
+    weeks = str(format(weeks, "b")).zfill(12)
+
+    zero_byte = bytearray(int_to_bytes(int(zero_byte + weeks[:-8], 2), 1))
+
+    first_byte = bytearray(int_to_bytes(int(str(weeks[4:]), 2), 1))
+ 
+    # next two bytes represent birthdate of person measured since January 1st, 1880
+    # big endian format and capped at 65,535 days
+    day_start = date(1880, 1, 1)
+    days = int((birthdate - day_start).days)
+    if days > 65535:
+        days = 65535
+    days = bytearray(int_to_bytes(days, 2))
+           
+    name = bytearray(encode_name(given_name,surname))
+    
+    return  bytes(zero_byte + first_byte + days + name)
+    
 
 def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> bytes:
     """Returns the output of the modified KMAC algorithm. See the assignment
@@ -353,8 +439,19 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     """
     assert length > 0
 
-    # delete this comment and insert your code here
+    #https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-185.pdf
+    
+    #sars = "OH SARS SECOND VERIFY"
+    #sars = sars.encode('utf-8')
+    
+    #while (key_hash % 136 != 0):
+    #    key_hash = key_hash + bytes(1)     # pad until mutliple of 136
+    #while (sars % 136 != 0):
+    #    sars = sars + bytes(1)
+        
 
+    #newX = bytepad(key_hash,168) + data + right_encode(length)
+    
 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
@@ -499,7 +596,122 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     assert len(salt) == 16
     assert 0 < health_id < 10000000000 # leading zeros are an issue
 
-    # delete this comment and insert your code here
+    (g, N) = DH_params
+    # conversions!
+    g, N = map( b2i, [g, N] )
+    
+    sock = create_socket( ip, port )
+    if sock is None:
+        return None
+
+    # send 'p'
+    count = send( sock, b'p' )
+    if count != 1:
+        return close_sock( sock )
+    
+    # retrieve N and g
+    expected = len(DH_params)
+    g_N = receive( sock, expected )
+    if len(g_N) != expected:
+        return close_sock( sock )
+
+    # check they match
+    if bytes_to_int(g_N[:expected>>1]) != DH_params[:expected>>1]:
+        return close_sock( sock )
+
+    if bytes_to_int(g_N[expected>>1:]) != DH_params[expected>>1:]:
+        return close_sock( sock )
+    
+    g = DH_params[:expected>>1]
+    N = DH_params[expected>>1:]
+     # calculate k before conversions, as it might be more efficient
+    k = calc_u( g, N )      # same action as u! 
+    varprint( k, 'k' )
+
+    # calculate x and v
+    x = calc_x( salt, secret ) 
+    v = calc_A( g, N, x )   # same action as A!
+    
+    # generate a via rejection sampling
+    a = randbits( 64 )
+    while a >= N:
+        a = randbits( 64 )
+
+    # calculate A
+    A = calc_A( g, N, a )
+    A_bytes = int_to_bytes( A, 64 )
+    ENC_A = RSA_key.encrypt(A_bytes)
+
+    # send A, username
+    u_enc = uuid.encode('utf-8')
+    u_len = int_to_bytes( len(u_enc), 1 )
+
+    data = ENC_A + u_len + u_enc
+    count = send( sock, data )
+    if count != len(data):
+        return close_sock( sock )
+    
+    # get salt, B
+    expected = 16 + 64
+    s_B = receive( sock, expected )
+    if len(s_B) != expected:
+        return close_sock( sock )
+
+    if salt != s_B[:16]:
+            return close_sock( sock )
+
+    B = bytes_to_int( s_B[16:] )
+
+    # compute u
+    u = calc_u( A_bytes, s_B[16:] )     # TODO calc with A_bytes or ENC_A?
+    
+     # compute K_client
+    K_client = calc_K_client( N, B, k, v, a, u, x )
+    
+    # get bits
+    bits = receive( sock, 1 )
+    if len(bits) != 1:
+        return close_sock( sock )
+
+    # find Y
+    Y = find_Y( K_client, bits )
+
+    # send Y
+    count = send( sock, Y )
+    if count != len(Y):
+        return close_sock( sock )
+
+    # receive M1_server
+    M1 = receive( sock, 32 )
+    if len(M1) != 32:
+        return close_sock( sock )
+
+    if M1 != calc_M1( A_bytes, K_client, Y ):       #TODO use A_bytes or ENC_A
+        return close_sock( sock )
+    
+    #With the shared key derived, the web client appends the OHN as a five byte number, three
+    #zero bytes, birthdate (days since January 1st, 1880, as two bytes), four zero bytes, and a date
+    #of vaccination (days since June 11th, 2006, as two bytes) in that order. The client encrypts
+    #that via AES-256 and uses the following 32 byte value as the key.
+    #H(P("OH SARS KEYEXTEND 1")jjP(NRSAjje)jjKclientjj0x20)
+    
+    #TODO send passport!!!
+    passport = 0   
+    server_passport = receive( sock, expected)
+    
+    # all done with the connection
+    close_sock( sock )
+    if server_passport != passport:
+        return None
+    else:
+        print( "Client: Protocol successful." )
+
+        return ( a, K_client, passport)  # both are ints
+
+
+    
+    
+    ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         key_hash:bytes, key_enc:bytes, bits:int, registered:dict, vax_database:dict \

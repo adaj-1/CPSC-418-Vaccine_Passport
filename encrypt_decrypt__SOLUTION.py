@@ -276,7 +276,7 @@ def pad( data:bytes, digest_size:int ) -> bytes:
 
     # figure out the value to pad with
     padding = digest_size - (len(data) % digest_size)
-    return data + (padding.to_bytes( 1, 'big' ) * padding)
+    return data + (padding.to_bytes( , 'big' ) * padding)
 
 ### END
 

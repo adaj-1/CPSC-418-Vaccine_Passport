@@ -1,0 +1,20 @@
+Low-level Functions:
+RSA.modulus()-------->DONE
+
+RSA.keypair()-------->DONE
+
+encode_name()-------->DONE
+
+gen_plaintext()------>DONE
+
+pseudoKMAC() 
+not sure how to setup properly but found a pdf that might be helpful 
+(commented in file)
+
+
+High-level Functions:
+
+
+request_passport()
+Tried to follow instructions not sure if im doing it right so far
+I copied a lot of it from basic_auth -> client_protocol
