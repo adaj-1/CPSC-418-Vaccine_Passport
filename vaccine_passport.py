@@ -684,12 +684,12 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
 
     # calculate A
     A = calc_A( g, N, a )
-    A_bytes = int_to_bytes( A, 64 )
     
     #encrypt via RSA encryption under server public key
-    ENC_A = int_to_bytes(RSA_key.encrypt(A_bytes), 256)
-    #TODO RECIEVE LENGTH OF ENC_A 128
-    # send ENC_A, uuid
+    ENC_A = int_to_bytes(RSA_key.encrypt(A), 256)
+    #TODO RECIEVE LENGTH OF ENC_A 
+
+    # send ENC_A and uuid
     u_enc = uuid.encode('utf-8')
     u_len = int_to_bytes( len(u_enc), 1 )
 
@@ -710,7 +710,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     B = bytes_to_int( s_B[16:] )
 
     # compute u
-    u = calc_u( A_bytes, s_B[16:] )     # TODO calc with A_bytes or ENC_A?
+    u = calc_u( A, s_B[16:] )     # TODO calc with A_bytes or ENC_A?
     
      # compute K_client
     K_client = calc_K_client( N, B, k, v, a, u, x )
@@ -733,7 +733,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     if len(M1) != 32:
         return close_sock( sock )
 
-    if M1 != calc_M1( A_bytes, K_client, Y ):       #TODO use A_bytes or ENC_A
+    if M1 != calc_M1( A, K_client, Y ):
         return close_sock( sock )
     
     #With the shared key derived, the web client appends the OHN as a five byte number, three
@@ -762,10 +762,6 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         print( "Client: Protocol successful." )
 
         return ( a, K_client, passport)  # both are ints
-
-
-    
-    
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -800,7 +796,106 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     assert len(registered) > 0
     assert len(vax_database) > 0
 
-    # delete this comment and insert your code here
+    # calculate k before conversions, as it might be more efficient
+    g = getattr(DH_params, 'g')
+    N = getattr(DH_params, 'N')
+    k = calc_u( g, N )      # same thing as u! 
+
+    # send g and N
+    g, N = map( lambda x: i2b(x,64), [g, N] )
+    data = g + N
+    count = send( sock, data )
+    if count != len(data):
+        return close_sock( sock )
+
+    # get ENC_A
+    ENC_A = receive( sock, 256 )
+    if len(ENC_A) != 256:
+        return close_sock( sock )
+    A = RSA_key.decrypt(bytes_to_int( ENC_A ))
+
+    # get username
+    data = receive( sock, 1 )
+    if len(data) != 1:
+        return close_sock( sock )
+    count = bytes_to_int( data )
+
+    u_enc = receive( sock, count )
+    if len(u_enc) != count:
+        return close_sock( sock )
+
+
+    try:
+        uuid = u_enc.decode('utf-8')
+    except:
+        return close_sock( sock )
+
+
+    g, N = map( b2i, [g, N] )
+
+    # retrieve s, v, if possible
+    if uuid in registered:
+        s, v = registered[uuid]
+    else:
+        return close_sock( sock )
+
+    # generate b via rejection sampling
+    b = randbits( 64 << 3 )
+    while b >= N:
+        b = randbits( 64 << 3 )
+    varprint( b, 'b', "Server" )
+
+    # calculate B
+    B = calc_B( g, N, b, k, v )
+    B_bytes = int_to_bytes( B, 64 )
+    varprint( B, 'B', "Server" )
+
+    # send s,B
+    data = s + B_bytes
+    count = send( sock, data )
+    if count != len(data):
+        return close_sock( sock )
+
+    # compute u
+    u = calc_u( A, B_bytes )
+    varprint( u, 'u', "Server" )
+
+    # compute K_server
+    K_server = calc_K_server( N, A, b, v, u )
+    varprint( K_server, 'K_server', "Server" )
+
+    # send bits
+    count = send( sock, bits.to_bytes(1,'big') )
+    if count != 1:
+        return close_sock( sock )
+
+    # receive Y
+    Y = receive( sock, 64 )
+    if len(Y) != 64:
+        return close_sock( sock )
+    varprint( Y, 'Y', "Server" )
+
+    # check Y
+    base = bits >> 3        # copy-paste code is worth the increased risk of breakage
+    mask = ~((1 << (8 - (bits&7))) - 1)
+
+    hashVal = blake2b_256( i2b(K_server,64) + Y )
+    if (hashVal[:base] != bytes(base)) or ((hashVal[base] & mask) != 0):
+        return close_sock( sock )
+
+    # compute M1
+    M1 = calc_M1( A, K_server, Y )
+    
+
+    # send M1. Defer error checking until after the socket's closed
+    count = send( sock, M1 )
+    close_sock( sock )
+    if count != len(M1):
+        return None
+    else:
+        print( "Server: Protocol successful." )
+        return (b2i(b), b2i(K_server), OHN, b2i(passport))
+    ### END
 
 ##### MAIN
 
