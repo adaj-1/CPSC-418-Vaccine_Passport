@@ -247,7 +247,12 @@ class RSA_key:
 
         assert type(message) in [int, bytes]
 
-        # delete this comment and insert your code here
+        message = b2i(message)
+        try:
+            return pow(message, self.d, self.N)
+        except:
+            return None
+
 
     def verify( self, message:Union[int,bytes], signature:Union[int,bytes] ) \
             -> bool:
@@ -273,7 +278,15 @@ class RSA_key:
 
         assert type(message) in [int, bytes]
 
-        # delete this comment and insert your code here
+        message = b2i(message)
+        signature = b2i(signature)
+        try:
+            if pow(signature, self.e, self.N) == message:
+                return True
+            else: 
+                return False
+        except:
+            return False
 
     def encrypt( self, message: Union[int,bytes] ) -> int:
         """Encrypt a message via this RSA key.
@@ -293,8 +306,8 @@ class RSA_key:
         """
 
         assert type(message) in [int, bytes]
-
-        # delete this comment and insert your code here
+        message = b2i(message)
+        return pow(message, self.e, self.N)
          
         
 
@@ -317,8 +330,13 @@ class RSA_key:
 
         assert type(cypher) in [int, bytes]
 
-        # delete this comment and insert your code here
-  
+        cypher = b2i(cypher)
+        try:
+            return pow(cypher, self.d, self.N)
+        except:
+            return None
+            
+
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
        assignment sheet for details.
