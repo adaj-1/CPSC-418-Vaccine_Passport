@@ -43,6 +43,9 @@ from typing import Callable, Iterator, Mapping, Optional, Union
 
 from random import randint
 
+from hashlib import shake_256, sha256
+from Crypto.Cipher import AES
+
 # bad news: all their external imports aren't imported into this namespace, 
 #  so you'll need to reimport. Do so here.
 
@@ -471,8 +474,26 @@ def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     assert len(nonce)     == 16
     assert len(inner_tag) == 16
 
-    # delete this comment and insert your code here
-
+    h = shake_256()
+    
+    nonce_tag_start = 0
+    nonce_tag_end = 0
+    nonce_tag_increment = 2
+    plaintext_start = 0
+    plaintext_end = 11
+    plaintext_increment = 12
+    data = b''
+    
+    for _ in range(8):
+        data = data + nonce[nonce_tag_start:nonce_tag_end] + plaintext[plaintext_start:plaintext_end] + inner_tag[nonce_tag_start:nonce_tag_end]
+        nonce_tag_start += nonce_tag_increment
+        nonce_tag_end += nonce_tag_increment
+        plaintext_start += plaintext_increment
+        plaintext_end += plaintext_increment
+    
+    h.update(data)    
+    return h.digest(128)
+    
 
 def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     """Encrypt the given plaintext, following a modified version of the 
@@ -596,9 +617,8 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     assert len(salt) == 16
     assert 0 < health_id < 10000000000 # leading zeros are an issue
 
-    (g, N) = DH_params
-    # conversions!
-    g, N = map( b2i, [g, N] )
+    g = getattr(DH_params, 'g')
+    N = getattr(DH_params, 'N')
     
     sock = create_socket( ip, port )
     if sock is None:
@@ -610,21 +630,19 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return close_sock( sock )
     
     # retrieve N and g
-    expected = len(DH_params)
+    expected = 64 * 2
     g_N = receive( sock, expected )
     if len(g_N) != expected:
         return close_sock( sock )
-
-    # check they match
-    if bytes_to_int(g_N[:expected>>1]) != DH_params[:expected>>1]:
-        return close_sock( sock )
-
-    if bytes_to_int(g_N[expected>>1:]) != DH_params[expected>>1:]:
-        return close_sock( sock )
     
-    g = DH_params[:expected>>1]
-    N = DH_params[expected>>1:]
-     # calculate k before conversions, as it might be more efficient
+    # check they match
+    if bytes_to_int(g_N[:expected>>1]) != g:
+        return close_sock( sock )
+
+    if bytes_to_int(g_N[expected>>1:]) != N:
+        return close_sock( sock )
+
+    # calculate k before conversions, as it might be more efficient
     k = calc_u( g, N )      # same action as u! 
     varprint( k, 'k' )
 
@@ -640,7 +658,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     # calculate A
     A = calc_A( g, N, a )
     A_bytes = int_to_bytes( A, 64 )
-    ENC_A = RSA_key.encrypt(A_bytes)
+    ENC_A = encrypt_data(A_bytes)
 
     # send A, username
     u_enc = uuid.encode('utf-8')
@@ -695,8 +713,14 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     #that via AES-256 and uses the following 32 byte value as the key.
     #H(P("OH SARS KEYEXTEND 1")jjP(NRSAjje)jjKclientjj0x20)
     
+    # next two bytes represent birthdate of person measured since January 1st, 1880
+    day_start = date(1880, 1, 1)
+    days = int((birthdate - day_start).days)
+    
+    vax_start = date(2006, 6, 11)
+    vax_days = int((vax_date - vax_start).days)
     #TODO send passport!!!
-    passport = 0   
+    passport = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4)  + int_to_bytes (vax_days,2)
     server_passport = receive( sock, expected)
     
     # all done with the connection

@@ -11,6 +11,8 @@ pseudoKMAC()
 not sure how to setup properly but found a pdf that might be helpful 
 (commented in file)
 
+interleave_data()
+working on this
 
 High-level Functions:
 
