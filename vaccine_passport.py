@@ -476,14 +476,17 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
         
 
     #newX = bytepad(key_hash,168) + data + right_encode(length)
-    sars = "OH SARS SECOND VERIFY"
+    #sars = "OH SARS SECOND VERIFY"
+    sars = "OH SARS QR MAC"
     sars = sars.encode('utf-8')
     sars = pad(sars, 136)
     key_hash = pad(key_hash, 136) 
-    nonce = token_bytes(16)
+    #nonce = token_bytes(16)
+    nonce = generate_iv(16)
     hash = hashlib.shake_256()
-    hash.update(sars + key_hash + nonce + data + b'0x10')
-    return hash.digest(length)
+    #hash.update(sars + key_hash + nonce + data + b'0x10')
+    hash.update(sars + key_hash + nonce + data + b'0x20')
+    return hash.digest(32)
 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
