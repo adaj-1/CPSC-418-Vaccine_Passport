@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 
 # good news: you get all these functions for free from prior assignment solutions
+from hmac import digest_size
 from encrypt_decrypt__SOLUTION import generate_iv, pad, unpad, xor
 from basic_auth__SOLUTION import b2i, blake2b_256, bytes_to_int, calc_A, calc_B, calc_K_client
 from basic_auth__SOLUTION import calc_K_server, calc_M1, calc_u, calc_x, client_register
 from basic_auth__SOLUTION import close_sock, create_socket, find_Y, i2b, int_to_bytes
 from basic_auth__SOLUTION import prim_root, receive, safe_prime, send, server_register
 from basic_auth__SOLUTION import split_ip_port
+
+import secrets
+import hashlib
 
 def varprint( data, label, source="Client" ):
     """A helper for printing out data. Must be copy-pasted from A2 to have the 
@@ -335,7 +339,7 @@ class RSA_key:
             return pow(cypher, self.d, self.N)
         except:
             return None
-            
+
 
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
@@ -469,7 +473,14 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
         
 
     #newX = bytepad(key_hash,168) + data + right_encode(length)
-    
+    sars = "OH SARS SECOND VERIFY"
+    sars = sars.encode('utf-8')
+    sars = pad(sars, 136)
+    key_hash = pad(key_hash, 136) 
+    nonce = token_bytes(16)
+    hash = hashlib.shake_256()
+    hash.update(sars + key_hash + nonce + data + b'0x10')
+    return hash.digest(length)
 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
