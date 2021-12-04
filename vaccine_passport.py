@@ -689,7 +689,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     A = calc_A( g, N, a )
     
     #encrypt via RSA encryption under server public key
-    ENC_A = int_to_bytes(RSA_key.encrypt(A), 256)
+    ENC_A = int_to_bytes(RSA_key.encrypt(A), 64)
     #TODO RECIEVE LENGTH OF ENC_A 
 
     # send ENC_A and uuid
@@ -812,10 +812,10 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         return close_sock( sock )
 
     # get ENC_A
-    ENC_A = receive( sock, 256 )
-    if len(ENC_A) != 256:
+    ENC_A = receive( sock, 192 )
+    if len(ENC_A) != 192:
         return close_sock( sock )
-    A = RSA_key.decrypt(bytes_to_int( ENC_A ))
+    A = RSA_key.decrypt( ENC_A )
 
     # get username
     data = receive( sock, 1 )
