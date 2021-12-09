@@ -668,8 +668,8 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     #passport = bytearray(passport)
     ciphertext = i2b(RSA_key.decrypt(passport), RSA_key.bytes)
     #ciphertext = pow(passport, RSA_key.d, RSA_key.N)
-    # if RSA_key.verify(ciphertext, passport) == False:
-    #         return None
+    if RSA_key.verify(ciphertext, passport) == False:
+             return None
     cipher = AES.new(key_enc, AES.MODE_ECB)
     qr = bytearray(cipher.decrypt(ciphertext))
     plaintext = bytearray()
@@ -677,7 +677,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
         block = bytearray(qr[i * 16 + 2])
         for j in range(3, 14):
             block = block + bytearray(qr[i*16 + j])
-        plaintext = bytearray(plaintext).append(bytearray(block))
+        plaintext = plaintext + block
     nonce = generate_iv(16)
     sars = "OH SARS SECOND VERIFY"
     tag = pseudoKMAC(key_hash, nonce + plaintext, 16, sars.encode('utf-8'))
