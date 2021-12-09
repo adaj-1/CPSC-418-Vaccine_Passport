@@ -622,9 +622,6 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     nonce = generate_iv(16)
     sars = "OH SARS SECOND VERIFY"
     tag = pseudoKMAC(key_hash, nonce + plaintext, 16, sars.encode('utf-8'))
-    plaintextArr = bytearray(plaintext)
-    nonceArr = bytearray(nonce)
-    tagArr = bytearray(tag)
     qr = bytearray(interleave_data(plaintext, nonce, tag))
     hash = hashlib.shake_256()
     hash.update(nonce + plaintext + tag)
@@ -641,8 +638,8 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     
   # key = RSA_key
     #assert ciphertext.bytes == 159
-    assert RSA_key.sign(ciphertext) != None
-    return i2b(RSA_key.sign(ciphertext), 319)
+    #assert RSA_key.sign(ciphertext) != None
+    return i2b(RSA_key.sign(ciphertext + digest), 319)
 
     
 
@@ -668,8 +665,32 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     """
     assert len(passport) == 319
     assert RSA_key.bytes == 160
+    #passport = bytearray(passport)
+    ciphertext = i2b(RSA_key.decrypt(passport), RSA_key.bytes)
+    #ciphertext = pow(passport, RSA_key.d, RSA_key.N)
+    # if RSA_key.verify(ciphertext, passport) == False:
+    #         return None
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    qr = bytearray(cipher.decrypt(ciphertext))
+    plaintext = bytearray()
+    for i in range(0, 8):
+        block = bytearray(qr[i * 16 + 2])
+        for j in range(3, 14):
+            block = block + bytearray(qr[i*16 + j])
+        plaintext = bytearray(plaintext).append(bytearray(block))
+    nonce = generate_iv(16)
+    sars = "OH SARS SECOND VERIFY"
+    tag = pseudoKMAC(key_hash, nonce + plaintext, 16, sars.encode('utf-8'))
+    surnameInd = b2i(bytes(plaintext[4]))
+    givenName = plaintext[5:surnameInd].decode('utf-8')
+    surname = plaintext[surnameInd:len(plaintext)].decode('utf-8')
+    daysSince = b2i(bytes(plaintext[2:3]))
+    refDate = date(1880, 1, 1)
+    dob = refDate + timedelta(days = daysSince)
+    numVax = plaintext[0] >> 4
+    weeksVax = plaintext[0] << 8 + plaintext[1]
+    return (givenName, surname, dob, numVax, weeksVax)
 
-    # delete this comment and insert your code here
 
 def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         DH_params:object, RSA_key:object, health_id:int, birthdate:date, \
