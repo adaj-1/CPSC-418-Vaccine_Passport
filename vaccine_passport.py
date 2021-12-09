@@ -773,21 +773,21 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
   
     byte_K_client = int_to_bytes(K_client, 64)
         
-    #health_data = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4) + int_to_bytes (vax_days,2)
-    health_data = bytes(16)
-    key_extend = "OH SARS KEYEXTEND 1"
-    key_extend = key_extend.encode('utf-8')
+    health_data = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4) + int_to_bytes (vax_days,2)
+    
+    custom = "OH SARS KEYEXTEND 1"
+    custom = custom.encode('utf-8')
     
     e_RSA = getattr(RSA_key,'e')
     N_RSA = getattr(RSA_key,'N')
     
     NE = int_to_bytes(N_RSA, RSA_key.bytes) + int_to_bytes(e_RSA, RSA_key.bytes)
     
-    AES_key = pseudoKMAC(byte_K_client, pad(key_extend, 136)+ pad(NE, 136) + byte_K_client + b'100000', 32)
+    AES_key = pseudoKMAC(NE, byte_K_client, 32, custom)
 
     cipher = AES.new(AES_key, AES.MODE_ECB)
-    ciphertext = cipher.encrypt(health_data)               #TODO leading zero byte for no reason?
-    
+    ciphertext = cipher.encrypt(health_data)
+
     count = send( sock, ciphertext )
     if count != len(ciphertext):
         return close_sock( sock )
@@ -798,19 +798,17 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     
     QR_code_len = b2i(QR_code_len)
     QR_code = receive(sock, QR_code_len)
-    if len(QR_code) != QR_code_len:
-        return close_sock( sock )
+    
     # all done with the connection
-    close_sock( sock )
+    close_sock(sock)
     
-
-    passport = decrypt_data(QR_code, byte_K_client[:32], byte_K_client[32:]) 
-    
-    if len(passport) != 319:
+    if len(QR_code) != QR_code_len:
         return None
-    else:
-        print( "Client: Protocol successful.")
-        return ( a, K_client, passport)
+    print( "Client: Protocol successful.")
+    
+    passport = decrypt_data(QR_code, byte_K_client[:32], byte_K_client[32:]) 
+    #TODO not sure if we need to verify_passport but i dont think we need to??
+    return ( a, K_client, passport)
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -863,7 +861,6 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         return close_sock( sock )
     A = RSA_key.decrypt( ENC_A )
     
-
     # get username
     data = receive( sock, 1 )
     if len(data) != 1:
@@ -879,6 +876,7 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     except:
         return close_sock( sock )
 
+    #TODO CHECK A IS NOT CONGRUENT TO 0
 
     g, N = map( b2i, [g, N] )
 
@@ -938,14 +936,76 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     # send M1. Defer error checking until after the socket's closed
     count = send( sock, M1 )
-    
     if count != len(M1):
-        close_sock( sock )
+        return close_sock( sock )
 
+    ciphertext = receive(sock, 16)
+    if len(ciphertext) != 16:
+        return close_sock (sock)
     
+    e_RSA = getattr(RSA_key,'e')
+    N_RSA = getattr(RSA_key,'N')
+    
+    NE = int_to_bytes(N_RSA, RSA_key.bytes) + int_to_bytes(e_RSA, RSA_key.bytes)
+    
+    custom = "OH SARS KEYEXTEND 1"
+    custom = custom.encode('utf-8')
+    
+    byte_K_server = i2b(K_server, 64)
+    AES_key = pseudoKMAC(NE, byte_K_server, 32, custom)
+    cipher = AES.new(AES_key, AES.MODE_ECB)
+    
+    health_data = cipher.decrypt(ciphertext)
+    
+    health_id = str(b2i(health_data[0:5]))
+    birthdays = b2i(health_data[8:10])
+    td_days = timedelta(days = birthdays)
+    vax_days = b2i(health_data[14:16])
+    td_vax = timedelta(days = vax_days)
+    
+    day_start = date(1880, 1, 1)
+    client_birthdate = day_start + td_days
+    
+    vax_start = date(2006, 6, 11)
+    client_vax_date = vax_start + td_vax
+    
+    if health_id in vax_database:
+        data_len = len(vax_database[health_id])
+        if data_len == 3:
+            given_name, surname, birth_date = vax_database[health_id]
+        elif data_len > 3:
+            given_name, surname, birth_date = vax_database[health_id]
+            (vax_type, vax_lot, vax_date) = vax_database[health_id][data_len - 1]
+    else:
+        return close_sock( sock )
+    
+    vax_count = data_len - 3
+    if vax_count == 0:
+        vax_date = vax_start
+    
+    if birth_date != client_birthdate:
+        return None
+    if vax_date != client_vax_date:
+        return None
+        
+    passport = create_passport(given_name, surname, birth_date, vax_count, vax_date, key_hash, key_enc, RSA_key)
+    passport = encrypt_data(passport,byte_K_server[:32], byte_K_server[32:])
+    
+    passport_len = i2b(len(passport), 4)
+    print(passport_len)
+    count = send( sock, passport_len )
+    if count != len(4):
+        return close_sock( sock )
+    
+    count = send( sock, passport )
+    if count != len(passport):
+        return close_sock( sock )
+    
+    # done with connection
+    close_sock(sock)
     
     print( "Server: Protocol successful." )
-    return (b2i(b), b2i(K_server), OHN, b2i(passport))
+    return (b2i(b), b2i(K_server), health_id, b2i(passport))
     ### END
 
 ##### MAIN
