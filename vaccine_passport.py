@@ -347,6 +347,12 @@ class RSA_key:
             return None
 
 
+def zfill(data: bytes, length: int):
+    while len(data) % length != 0:
+        data = bytes(1) + data
+    return data
+
+
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
        assignment sheet for details.
@@ -483,8 +489,8 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     sars = "OH SARS QR MAC"
     #sars = data.encode('utf-8')
     #data = pad(data, 136)
-    custom = pad(custom, 136)
-    key_hash = pad(key_hash, 136) 
+    custom = zfill(custom, 136)
+    key_hash = zfill(key_hash, 136) 
     #nonce = token_bytes(16)
     nonce = generate_iv(16)
     hash = hashlib.shake_256()
