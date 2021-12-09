@@ -11,6 +11,8 @@ from basic_auth__SOLUTION import split_ip_port
 
 import secrets
 import hashlib
+from Crypto.Cipher import AES
+
 
 def varprint( data, label, source="Client" ):
     """A helper for printing out data. Must be copy-pasted from A2 to have the 
@@ -45,9 +47,10 @@ from threading import Thread
 from time import sleep
 from typing import Callable, Iterator, Mapping, Optional, Union
 
-from random import randint
+from random import randint 
 
 from hashlib import shake_256, sha256
+from Crypto.Cipher import AES
 
 
 # bad news: all their external imports aren't imported into this namespace, 
@@ -478,16 +481,20 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     #newX = bytepad(key_hash,168) + data + right_encode(length)
     #sars = "OH SARS SECOND VERIFY"
     sars = "OH SARS QR MAC"
-    sars = sars.encode('utf-8')
-    sars = pad(sars, 136)
+    #sars = data.encode('utf-8')
+    #data = pad(data, 136)
+    custom = pad(custom, 136)
     key_hash = pad(key_hash, 136) 
     #nonce = token_bytes(16)
     nonce = generate_iv(16)
     hash = hashlib.shake_256()
     #hash.update(sars + key_hash + nonce + data + b'0x10')
-    hash.update(sars + key_hash + nonce + data + b'0x20')
-    return hash.digest(32)
+    #hash.update(custom + key_hash + data + hex(length).encode('utf-8'))
+    lengthHex = hex(length)
+    hash.update(custom + key_hash + data + i2b(length, 1))
 
+    return hash.digest(length)
+ 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
        described in the assignment write-up.
@@ -516,8 +523,9 @@ def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     inner_tag = bytearray(inner_tag)
     data = bytearray()
 
-    for _ in range(8):  
-        data = data + nonce[NT_start:NT_end] + plaintext[P_start:P_end] + inner_tag[NT_start:NT_end]
+    for _ in range(8):
+        block = nonce[NT_start:NT_end] + plaintext[P_start:P_end] + inner_tag[NT_start:NT_end]  
+        data = data + block
         NT_start += 2
         NT_end += 2
         P_start += 12
@@ -542,7 +550,18 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    #plaintext = pad(plaintext, 32)
+    ciphertext = cipher.encrypt(pad(plaintext, 32))
+    iv = generate_iv(16) 
+    #ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    MAC = pseudoKMAC(key_mac, plaintext, 32, iv)
+    sars = "OH SARS QR MAC"
+    sars = sars.encode('utf-8')
+    hash = hashlib.shake_256()
+    hash.update(pad(sars, 136) + pad(key_mac, 136) + iv + ciphertext + b'100000')
+    return iv + ciphertext + hash.digest(32)
+
 
 def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[bytes]:
     """Decrypt the data encrypted by encrypt_data(). Also perform all necessary 
@@ -562,7 +581,12 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    try:
+        plaintext = cipher.decrypt(cyphertext)
+        return plaintext
+    except:
+        return None
 
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
         last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:object ) -> bytes:
@@ -687,18 +711,23 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
 
     # calculate A
     A = calc_A( g, N, a )
-    
     #encrypt via RSA encryption under server public key
-    ENC_A = int_to_bytes(RSA_key.encrypt(A), 64)
-    #TODO RECIEVE LENGTH OF ENC_A 
+    ENC_A = int_to_bytes(RSA_key.encrypt(A),RSA_key.bytes)
 
     # send ENC_A and uuid
     u_enc = uuid.encode('utf-8')
     u_len = int_to_bytes( len(u_enc), 1 )
 
-    data = ENC_A + u_len + u_enc
-    count = send( sock, data )
-    if count != len(data):
+    count = send( sock, ENC_A )
+    if count != len(ENC_A):
+        return close_sock( sock )
+    
+    count = send( sock, u_len )
+    if count != len(u_len):
+        return close_sock( sock )
+    
+    count = send( sock, u_enc )
+    if count != len(u_enc):
         return close_sock( sock )
     
     # get salt, B
@@ -751,20 +780,47 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     
     vax_start = date(2006, 6, 11)
     vax_days = int((vax_date - vax_start).days)
-    #TODO send passport!!!
-    passport = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4)  + int_to_bytes (vax_days,2)
+  
+    byte_K_client = int_to_bytes(K_client, 64)
+        
+    #health_data = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4) + int_to_bytes (vax_days,2)
+    health_data = bytes(16)
+    key_extend = "OH SARS KEYEXTEND 1"
+    key_extend = key_extend.encode('utf-8')
     
+    e_RSA = getattr(RSA_key,'e')
+    N_RSA = getattr(RSA_key,'N')
     
-    server_passport = receive(sock, expected)
+    NE = int_to_bytes(N_RSA, RSA_key.bytes) + int_to_bytes(e_RSA, RSA_key.bytes)
     
+    AES_key = pseudoKMAC(byte_K_client, pad(key_extend, 136)+ pad(NE, 136) + byte_K_client + b'100000', 32)
+
+    cipher = AES.new(AES_key, AES.MODE_ECB)
+    ciphertext = cipher.encrypt(health_data)               #TODO leading zero byte for no reason?
+    
+    count = send( sock, ciphertext )
+    if count != len(ciphertext):
+        return close_sock( sock )
+
+    QR_code_len = receive(sock, 4)
+    if len(QR_code_len) != 4:
+        return close_sock( sock )
+    
+    QR_code_len = b2i(QR_code_len)
+    QR_code = receive(sock, QR_code_len)
+    if len(QR_code) != QR_code_len:
+        return close_sock( sock )
     # all done with the connection
     close_sock( sock )
-    if server_passport != passport:
+    
+
+    passport = decrypt_data(QR_code, byte_K_client[:32], byte_K_client[32:]) 
+    
+    if len(passport) != 319:
         return None
     else:
-        print( "Client: Protocol successful." )
-
-        return ( a, K_client, passport)  # both are ints
+        print( "Client: Protocol successful.")
+        return ( a, K_client, passport)
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -812,10 +868,11 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         return close_sock( sock )
 
     # get ENC_A
-    ENC_A = receive( sock, 192 )
-    if len(ENC_A) != 192:
+    ENC_A = receive( sock, RSA_key.bytes )
+    if len(ENC_A) != RSA_key.bytes:
         return close_sock( sock )
     A = RSA_key.decrypt( ENC_A )
+    
 
     # get username
     data = receive( sock, 1 )
@@ -826,7 +883,6 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     u_enc = receive( sock, count )
     if len(u_enc) != count:
         return close_sock( sock )
-
 
     try:
         uuid = u_enc.decode('utf-8')
@@ -892,12 +948,14 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     # send M1. Defer error checking until after the socket's closed
     count = send( sock, M1 )
-    close_sock( sock )
+    
     if count != len(M1):
-        return None
-    else:
-        print( "Server: Protocol successful." )
-        return (b2i(b), b2i(K_server), OHN, b2i(passport))
+        close_sock( sock )
+
+    
+    
+    print( "Server: Protocol successful." )
+    return (b2i(b), b2i(K_server), OHN, b2i(passport))
     ### END
 
 ##### MAIN
