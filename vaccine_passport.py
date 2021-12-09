@@ -349,7 +349,7 @@ class RSA_key:
 
 def zfill(data: bytes, length: int):
     while len(data) % length != 0:
-        data = bytes(1) + data
+        data =  data + bytes(1)
     return data
 
 
@@ -475,31 +475,15 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
 
     #https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-185.pdf
     
-    #sars = "OH SARS SECOND VERIFY"
-    #sars = sars.encode('utf-8')
-    
-    #while (key_hash % 136 != 0):
-    #    key_hash = key_hash + bytes(1)     # pad until mutliple of 136
-    #while (sars % 136 != 0):
-    #    sars = sars + bytes(1)
+    sars = b''
+    if custom != b'':
+        sars = zfill(custom,136)    
         
-
-    #newX = bytepad(key_hash,168) + data + right_encode(length)
-    #sars = "OH SARS SECOND VERIFY"
-    sars = "OH SARS QR MAC"
-    #sars = data.encode('utf-8')
-    #data = pad(data, 136)
-    custom = zfill(custom, 136)
-    key_hash = zfill(key_hash, 136) 
-    #nonce = token_bytes(16)
-    nonce = generate_iv(16)
+    key_hash = zfill(key_hash, 136)
     hash = hashlib.shake_256()
-    #hash.update(sars + key_hash + nonce + data + b'0x10')
-    #hash.update(custom + key_hash + data + hex(length).encode('utf-8'))
-    lengthHex = hex(length)
-    hash.update(custom + key_hash + data + i2b(length, 1))
-
-    return hash.digest(length)
+    hash.update(sars + key_hash + data + int_to_bytes(length,1))
+    tag = hash.digest(length)
+    return tag
  
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
