@@ -11,6 +11,8 @@ from basic_auth__SOLUTION import split_ip_port
 
 import secrets
 import hashlib
+from Crypto.Cipher import AES
+
 
 def varprint( data, label, source="Client" ):
     """A helper for printing out data. Must be copy-pasted from A2 to have the 
@@ -478,16 +480,20 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     #newX = bytepad(key_hash,168) + data + right_encode(length)
     #sars = "OH SARS SECOND VERIFY"
     sars = "OH SARS QR MAC"
-    sars = sars.encode('utf-8')
-    sars = pad(sars, 136)
+    #sars = data.encode('utf-8')
+    #data = pad(data, 136)
+    custom = pad(custom, 136)
     key_hash = pad(key_hash, 136) 
     #nonce = token_bytes(16)
     nonce = generate_iv(16)
     hash = hashlib.shake_256()
     #hash.update(sars + key_hash + nonce + data + b'0x10')
-    hash.update(sars + key_hash + nonce + data + b'0x20')
-    return hash.digest(32)
+    #hash.update(custom + key_hash + data + hex(length).encode('utf-8'))
+    lengthHex = hex(length)
+    hash.update(custom + key_hash + data + i2b(length, 1))
 
+    return hash.digest(length)
+ 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     """Combine the plaintext, nonce, and inner_tag into the interleaved format
        described in the assignment write-up.
@@ -542,7 +548,18 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    #plaintext = pad(plaintext, 32)
+    ciphertext = cipher.encrypt(pad(plaintext, 32))
+    iv = generate_iv(16) 
+    #ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    MAC = pseudoKMAC(key_mac, plaintext, 32, iv)
+    sars = "OH SARS QR MAC"
+    sars = sars.encode('utf-8')
+    hash = hashlib.shake_256()
+    hash.update(pad(sars, 136) + pad(key_mac, 136) + iv + ciphertext + b'100000')
+    return iv + ciphertext + hash.digest(32)
+
 
 def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[bytes]:
     """Decrypt the data encrypted by encrypt_data(). Also perform all necessary 
@@ -562,7 +579,12 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    try:
+        plaintext = cipher.decrypt(cyphertext)
+        return plaintext
+    except:
+        return None
 
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
         last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:object ) -> bytes:
