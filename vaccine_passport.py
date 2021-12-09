@@ -602,20 +602,6 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     assert vax_count >= 0
     assert RSA_key.bytes == 160
     
-    # if vax_count > 15:
-    #     vax_count = 15
-    # vax_count_bits = vax_count << 4
-    # dateSince = date.fromisoformat('2006-06-11')
-    # weeksDelta = (last_vax_date - dateSince).days / 7 
-    # zeroByte = i2b(vax_count_bits + weeksDelta >> 8, 1)
-    # weeksDelta = weeksDelta << 4
-    # oneByte = i2b(weeksDelta >> 4, 1)
-    # bdaySince = date.fromisoformat('1880-01-01') 
-    # daysDelta = (birthdate - bdaySince).days
-    # if daysDelta > 65535:
-    #     daysDelta = 65535
-    # two3Byte = i2b(daysDelta, 2)
-    # four95Byte = encode_name(given_name, surname)
     plaintext = gen_plaintext(given_name, surname, birthdate, vax_count, last_vax_date)
     nonce = generate_iv(16)
     sars = "OH SARS SECOND VERIFY"
@@ -631,14 +617,16 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     ciphertext = b''
     block = bytearray()
     
-
     for i in range(0, 8):
-        block = qr[i]
-        for j in range(1, 32):
-            block = block + qr[i*32 + j]
-        ciphertext = ciphertext + cipher.encrypt(block)
-    key = RSA_key()
-    return key.sign(ciphertext)
+        block = bytearray(qr[i * 16])
+        for j in range(1, 16):
+            block = block + bytearray(qr[i*16 + j])
+        ciphertext = ciphertext + cipher.encrypt(zfill(block, 32))
+    
+  # key = RSA_key
+    #assert ciphertext.bytes == 159
+    assert RSA_key.sign(ciphertext) != None
+    return i2b(RSA_key.sign(ciphertext), 319)
 
     
 
