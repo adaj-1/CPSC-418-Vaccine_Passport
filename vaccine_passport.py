@@ -603,6 +603,13 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     assert RSA_key.bytes == 160
     
     # delete this comment and insert your code here
+    # if vax_count > 15:
+    #     vax_count = 15
+    # vax_count_bits = vax_count << 4
+    # dateSince = date.fromisoformat('2006-06-11')
+    # weeksDelta = (last_vax_date - dateSince).days / 7 
+    return RSA.sign(qr + digest)
+
 
 def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Optional[bytes]=None \
         ) -> Optional[tuple[str,str,date,int,int]]:
