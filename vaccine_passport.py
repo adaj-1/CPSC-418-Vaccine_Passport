@@ -45,9 +45,10 @@ from threading import Thread
 from time import sleep
 from typing import Callable, Iterator, Mapping, Optional, Union
 
-from random import randint
+from random import randint 
 
 from hashlib import shake_256, sha256
+from Crypto.Cipher import AES
 
 
 # bad news: all their external imports aren't imported into this namespace, 
@@ -516,8 +517,9 @@ def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
     inner_tag = bytearray(inner_tag)
     data = bytearray()
 
-    for _ in range(8):  
-        data = data + nonce[NT_start:NT_end] + plaintext[P_start:P_end] + inner_tag[NT_start:NT_end]
+    for _ in range(8):
+        block = nonce[NT_start:NT_end] + plaintext[P_start:P_end] + inner_tag[NT_start:NT_end]  
+        data = data + block
         NT_start += 2
         NT_end += 2
         P_start += 12
@@ -687,18 +689,23 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
 
     # calculate A
     A = calc_A( g, N, a )
-    
     #encrypt via RSA encryption under server public key
-    ENC_A = int_to_bytes(RSA_key.encrypt(A), 64)
-    #TODO RECIEVE LENGTH OF ENC_A 
+    ENC_A = int_to_bytes(RSA_key.encrypt(A),RSA_key.bytes)
 
     # send ENC_A and uuid
     u_enc = uuid.encode('utf-8')
     u_len = int_to_bytes( len(u_enc), 1 )
 
-    data = ENC_A + u_len + u_enc
-    count = send( sock, data )
-    if count != len(data):
+    count = send( sock, ENC_A )
+    if count != len(ENC_A):
+        return close_sock( sock )
+    
+    count = send( sock, u_len )
+    if count != len(u_len):
+        return close_sock( sock )
+    
+    count = send( sock, u_enc )
+    if count != len(u_enc):
         return close_sock( sock )
     
     # get salt, B
@@ -751,20 +758,47 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     
     vax_start = date(2006, 6, 11)
     vax_days = int((vax_date - vax_start).days)
-    #TODO send passport!!!
-    passport = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4)  + int_to_bytes (vax_days,2)
+  
+    byte_K_client = int_to_bytes(K_client, 64)
+        
+    #health_data = int_to_bytes(health_id, 5) + bytes(3) + int_to_bytes(days,2) + bytes(4) + int_to_bytes (vax_days,2)
+    health_data = bytes(16)
+    key_extend = "OH SARS KEYEXTEND 1"
+    key_extend = key_extend.encode('utf-8')
     
+    e_RSA = getattr(RSA_key,'e')
+    N_RSA = getattr(RSA_key,'N')
     
-    server_passport = receive(sock, expected)
+    NE = int_to_bytes(N_RSA, RSA_key.bytes) + int_to_bytes(e_RSA, RSA_key.bytes)
     
+    AES_key = pseudoKMAC(byte_K_client, pad(key_extend, 136)+ pad(NE, 136) + byte_K_client + b'100000', 32)
+
+    cipher = AES.new(AES_key, AES.MODE_ECB)
+    ciphertext = cipher.encrypt(health_data)               #TODO leading zero byte for no reason?
+    
+    count = send( sock, ciphertext )
+    if count != len(ciphertext):
+        return close_sock( sock )
+
+    QR_code_len = receive(sock, 4)
+    if len(QR_code_len) != 4:
+        return close_sock( sock )
+    
+    QR_code_len = b2i(QR_code_len)
+    QR_code = receive(sock, QR_code_len)
+    if len(QR_code) != QR_code_len:
+        return close_sock( sock )
     # all done with the connection
     close_sock( sock )
-    if server_passport != passport:
+    
+
+    passport = decrypt_data(QR_code, byte_K_client[:32], byte_K_client[32:]) 
+    
+    if len(passport) != 319:
         return None
     else:
-        print( "Client: Protocol successful." )
-
-        return ( a, K_client, passport)  # both are ints
+        print( "Client: Protocol successful.")
+        return ( a, K_client, passport)
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -812,10 +846,11 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         return close_sock( sock )
 
     # get ENC_A
-    ENC_A = receive( sock, 192 )
-    if len(ENC_A) != 192:
+    ENC_A = receive( sock, RSA_key.bytes )
+    if len(ENC_A) != RSA_key.bytes:
         return close_sock( sock )
     A = RSA_key.decrypt( ENC_A )
+    
 
     # get username
     data = receive( sock, 1 )
@@ -826,7 +861,6 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     u_enc = receive( sock, count )
     if len(u_enc) != count:
         return close_sock( sock )
-
 
     try:
         uuid = u_enc.decode('utf-8')
@@ -892,12 +926,14 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     # send M1. Defer error checking until after the socket's closed
     count = send( sock, M1 )
-    close_sock( sock )
+    
     if count != len(M1):
-        return None
-    else:
-        print( "Server: Protocol successful." )
-        return (b2i(b), b2i(K_server), OHN, b2i(passport))
+        close_sock( sock )
+
+    
+    
+    print( "Server: Protocol successful." )
+    return (b2i(b), b2i(K_server), OHN, b2i(passport))
     ### END
 
 ##### MAIN
