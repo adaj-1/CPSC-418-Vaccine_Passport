@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # good news: you get all these functions for free from prior assignment solutions
-from hmac import digest_size
+from hmac import digest_size, new
 from encrypt_decrypt__SOLUTION import generate_iv, pad, unpad, xor
 from basic_auth__SOLUTION import b2i, blake2b_256, bytes_to_int, calc_A, calc_B, calc_K_client
 from basic_auth__SOLUTION import calc_K_server, calc_M1, calc_u, calc_x, client_register
@@ -602,13 +602,45 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     assert vax_count >= 0
     assert RSA_key.bytes == 160
     
-    # delete this comment and insert your code here
     # if vax_count > 15:
     #     vax_count = 15
     # vax_count_bits = vax_count << 4
     # dateSince = date.fromisoformat('2006-06-11')
     # weeksDelta = (last_vax_date - dateSince).days / 7 
-    return RSA.sign(qr + digest)
+    # zeroByte = i2b(vax_count_bits + weeksDelta >> 8, 1)
+    # weeksDelta = weeksDelta << 4
+    # oneByte = i2b(weeksDelta >> 4, 1)
+    # bdaySince = date.fromisoformat('1880-01-01') 
+    # daysDelta = (birthdate - bdaySince).days
+    # if daysDelta > 65535:
+    #     daysDelta = 65535
+    # two3Byte = i2b(daysDelta, 2)
+    # four95Byte = encode_name(given_name, surname)
+    plaintext = gen_plaintext(given_name, surname, birthdate, vax_count, last_vax_date)
+    nonce = generate_iv(16)
+    sars = "OH SARS SECOND VERIFY"
+    tag = pseudoKMAC(key_hash, nonce + plaintext, 16, sars.encode('utf-8'))
+    plaintextArr = bytearray(plaintext)
+    nonceArr = bytearray(nonce)
+    tagArr = bytearray(tag)
+    qr = bytearray(interleave_data(plaintext, nonce, tag))
+    hash = hashlib.shake_256()
+    hash.update(nonce + plaintext + tag)
+    digest = hash.digest(31)
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+    ciphertext = b''
+    block = bytearray()
+    
+
+    for i in range(0, 8):
+        block = qr[i]
+        for j in range(1, 32):
+            block = block + qr[i*32 + j]
+        ciphertext = ciphertext + cipher.encrypt(block)
+    key = RSA_key()
+    return key.sign(ciphertext)
+
+    
 
 
 def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Optional[bytes]=None \

@@ -16,15 +16,12 @@ encode_name()-------->DONE
 
 gen_plaintext()------>DONE
 
-pseudoKMAC()--------->IP, TS
+pseudoKMAC()--------->DONE
 
 interleave_data()------>DONE
 
 
 
-pseudoKMAC() 
-not sure how to setup properly but found a pdf that might be helpful 
-(commented in file)
 
 
 High-level Functions:
