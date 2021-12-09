@@ -539,19 +539,27 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     """
     assert len(key_enc) == 32
     assert len(key_mac) == 32
+    
+    plaintext = pad(plaintext, 16)
+    cipher     = AES.new(key_enc, AES.MODE_ECB)
+    ciphertext = b''
+    blocksize = 16
 
-    cipher = AES.new(key_enc, AES.MODE_ECB)
-    #plaintext = pad(plaintext, 32)
-    ciphertext = cipher.encrypt(pad(plaintext, 32))
-    iv = generate_iv(16) 
-    #ciphertext, tag = cipher.encrypt_and_digest(plaintext)
-    MAC = pseudoKMAC(key_mac, plaintext, 32, iv)
     sars = "OH SARS QR MAC"
     sars = sars.encode('utf-8')
-    hash = hashlib.shake_256()
-    hash.update(pad(sars, 136) + pad(key_mac, 136) + iv + ciphertext + b'100000')
-    return iv + ciphertext + hash.digest(32)
-
+    
+    iv = generate_iv(16)
+    
+    for i in range (len(plaintext) // blocksize):
+        idx  = i * blocksize
+        data = plaintext[idx:idx + blocksize]
+        block_id = xor(i2b(i, 16), iv)
+        randomness = cipher.encrypt(block_id)
+        ciphertext += xor(data, randomness)
+    
+    MAC = pseudoKMAC(key_mac, iv + ciphertext, 32, sars)
+     
+    return iv + ciphertext + MAC
 
 def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[bytes]:
     """Decrypt the data encrypted by encrypt_data(). Also perform all necessary 
