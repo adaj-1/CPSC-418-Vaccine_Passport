@@ -544,10 +544,6 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     cipher     = AES.new(key_enc, AES.MODE_ECB)
     ciphertext = b''
     blocksize = 16
-
-    sars = "OH SARS QR MAC"
-    sars = sars.encode('utf-8')
-    
     iv = generate_iv(16)
     
     for i in range (len(plaintext) // blocksize):
@@ -557,6 +553,8 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
         randomness = cipher.encrypt(block_id)
         ciphertext += xor(data, randomness)
     
+    sars = "OH SARS QR MAC"
+    sars = sars.encode('utf-8')
     MAC = pseudoKMAC(key_mac, iv + ciphertext, 32, sars)
      
     return iv + ciphertext + MAC
@@ -578,14 +576,24 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
     """
     assert len(key_enc) == 32
     assert len(key_mac) == 32
-
-    cipher = AES.new(key_enc, AES.MODE_ECB)
-    try:
-        plaintext = cipher.decrypt(cyphertext)
-        return plaintext
-    except:
+    
+    #TODO sanity check of length of cyphertext? see encrypt_decrypt decrypt_and_verify function
+    sars = "OH SARS QR MAC"
+    sars = sars.encode('utf-8')
+    
+    iv = cyphertext[0:16]
+    ciphertext = cyphertext[16:-16]
+    MAC = cyphertext[-16:]
+    test = pseudoKMAC(key_mac, iv + ciphertext, 32, sars)
+    
+    if test != MAC:
         return None
-
+    
+    padded = encrypt_data(ciphertext, key_enc, key_mac)
+    decrypted = unpad(padded)
+    plaintext = decrypted[16:-16]
+    return plaintext
+    
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
         last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:object ) -> bytes:
     """Create a vaccine passport, using the above functions. This includes signing
