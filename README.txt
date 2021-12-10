@@ -3,6 +3,9 @@ vaccine_passport.py
 
 Tyler Shenassa
 30023002
+and
+Jada Li
+30016807
 
 Fully Implemented:
 
@@ -28,4 +31,4 @@ Partially Implemented:
 
 Notes:
 	- No known bugs
-	- Partnered with Jada Li
+
