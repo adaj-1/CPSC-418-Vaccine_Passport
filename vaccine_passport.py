@@ -622,23 +622,21 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     nonce = generate_iv(16)
     sars = "OH SARS SECOND VERIFY"
     tag = pseudoKMAC(key_hash, nonce + plaintext, 16, sars.encode('utf-8'))
-    qr = bytearray(interleave_data(plaintext, nonce, tag))
+    qr = interleave_data(plaintext, nonce, tag)
     hash = hashlib.shake_256()
     hash.update(nonce + plaintext + tag)
     digest = hash.digest(31)
+    
     cipher = AES.new(key_enc, AES.MODE_ECB)
     ciphertext = b''
-    block = bytearray()
+    #block = bytearray()
+    blocksize = 16
     
-    for i in range(0, 8):
-        block = bytearray(qr[i * 16])
-        for j in range(1, 16):
-            block = block + bytearray(qr[i*16 + j])
-        ciphertext = ciphertext + cipher.encrypt(zfill(block, 32))
-    
-  # key = RSA_key
-    #assert ciphertext.bytes == 159
-    #assert RSA_key.sign(ciphertext) != None
+    for i in range (8):
+        idx  = i * blocksize
+        data = qr[idx:idx + blocksize]
+        ciphertext += cipher.encrypt(data)
+ 
     return i2b(RSA_key.sign(ciphertext + digest), 319)
 
     
